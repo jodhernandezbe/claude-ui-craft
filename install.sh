@@ -17,11 +17,38 @@ if [ -z "$PROJECT" ] || [ ! -d "$PROJECT" ]; then
   echo "usage: $0 <project-root> [ui-dir]" >&2
   exit 1
 fi
-PROJECT="$(cd "$PROJECT" && pwd)"
+PROJECT="$(cd "$PROJECT" && pwd -P)"
 UI_DIR="${UI_DIR%/}"
+
+# The first argument is the PROJECT ROOT, not the UI folder. Passing the UI folder puts .claude
+# in the wrong place and scaffolds a nested design document, so refuse it and print the command
+# that would have worked.
+ROOT="$(git -C "$PROJECT" rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$ROOT" ] && ROOT="$(cd "$ROOT" && pwd -P)"
+if [ -n "$ROOT" ] && [ "$ROOT" != "$PROJECT" ]; then
+  REL="${PROJECT#"$ROOT"/}"
+  echo "error: '$PROJECT' is not the project root; it is '$REL' inside the repository at:" >&2
+  echo "         $ROOT" >&2
+  echo "       .claude/ belongs at the root, so Claude Code finds it from anywhere in the repo." >&2
+  echo "       Did you mean:" >&2
+  echo "         $0 \"$ROOT\" \"$REL\"" >&2
+  exit 1
+fi
+if [ -z "$ROOT" ] && [ ! -d "$PROJECT/.git" ]; then
+  echo "note: '$PROJECT' is not a git repository; installing there as the project root." >&2
+fi
+
 if [ "$UI_DIR" = "." ] || [ -z "$UI_DIR" ]; then
   UI_SRC="src"; DESIGN_DIR="$PROJECT"
 else
+  if [ ! -d "$PROJECT/$UI_DIR" ]; then
+    echo "error: ui dir '$UI_DIR' does not exist under $PROJECT" >&2
+    echo "       candidates found:" >&2
+    find "$PROJECT" -maxdepth 3 -name package.json -not -path "*/node_modules/*" 2>/dev/null |
+      sed "s|^$PROJECT/||; s|/package.json$||" | sed 's/^/         /' >&2
+    echo "       or pass '.' when the UI is the whole repository." >&2
+    exit 1
+  fi
   UI_SRC="$UI_DIR/src"; DESIGN_DIR="$PROJECT/$UI_DIR"
 fi
 [ -d "$PROJECT/$UI_SRC" ] || UI_SRC="$UI_DIR"
